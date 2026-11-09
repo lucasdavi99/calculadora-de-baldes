@@ -1,0 +1,9 @@
+# IDE e build
+.idea/
+out/
+*.iml
+.kotlin
+
+# Sistema
+.DS_Store
+Thumbs.db
