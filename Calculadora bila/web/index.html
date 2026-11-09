@@ -1,0 +1,637 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Calculadora da Bila</title>
+<style>
+  :root {
+    --fundo: #fbf7f0; --cartao: #ffffff; --texto: #2b2620; --suave: #7a6f62; --borda: #e6dccd;
+    --marca: #b45309; --marca-claro: #fde8cf; --ok: #15803d; --ok-claro: #dcfce7;
+    --alerta: #b91c1c; --alerta-claro: #fee2e2; --info: #1d4ed8; --info-claro: #dbeafe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fundo: #1c1814; --cartao: #27221c; --texto: #f3ece1; --suave: #b3a591; --borda: #3a332a;
+      --marca: #f59e0b; --marca-claro: #3b2a12; --ok: #4ade80; --ok-claro: #14301f;
+      --alerta: #f87171; --alerta-claro: #3b1a1a; --info: #93c5fd; --info-claro: #1b2a47;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fundo); color: var(--texto); font: 18px/1.4 system-ui, "Segoe UI", sans-serif; }
+  .app { max-width: 760px; margin: 0 auto; padding: 12px 16px 80px; }
+  h1 { font-size: 22px; margin: 8px 0 12px; }
+  h2 { font-size: 19px; margin: 0 0 10px; }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 14px; padding: 14px; margin-bottom: 14px; }
+  .suave { color: var(--suave); font-size: 15px; }
+
+  /* seletor de mês */
+  .mes-nav { display: flex; align-items: center; gap: 8px; }
+  .mes-nav .nome { flex: 1; text-align: center; font-weight: 700; font-size: 20px; }
+
+  /* faixa com o saldo */
+  .faixa { display: flex; gap: 10px; margin: 12px 0; }
+  .faixa > div { flex: 1; border-radius: 12px; padding: 10px 12px; background: var(--marca-claro); }
+  .faixa .rotulo { font-size: 14px; color: var(--suave); }
+  .faixa .valor { font-size: 22px; font-weight: 800; }
+  .faixa .falta { background: var(--alerta-claro); } .faixa .falta .valor { color: var(--alerta); }
+  .faixa .quitado { background: var(--ok-claro); } .faixa .quitado .valor { color: var(--ok); }
+  .faixa .credito { background: var(--info-claro); } .faixa .credito .valor { color: var(--info); }
+
+  /* abas */
+  nav.abas { display: flex; gap: 6px; position: sticky; top: 0; background: var(--fundo); padding: 6px 0 10px; z-index: 5; overflow-x: auto; }
+  nav.abas button { flex: 1; white-space: nowrap; }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { border: 1px solid var(--borda); background: var(--cartao); border-radius: 10px; padding: 10px 14px; cursor: pointer; min-height: 46px; }
+  button:hover { border-color: var(--marca); }
+  button.ativa { background: var(--marca); color: #fff; border-color: var(--marca); font-weight: 700; }
+  button.principal { background: var(--marca); color: #fff; border-color: var(--marca); font-weight: 700; }
+  button.perigo { color: var(--alerta); }
+  button.mini { min-height: 36px; padding: 4px 10px; font-size: 15px; }
+  input[type=text], input[type=number], input[type=date] {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--borda); border-radius: 10px; background: var(--fundo); min-height: 48px;
+  }
+  input:focus, button:focus-visible { outline: 3px solid var(--marca); outline-offset: 1px; }
+  label { display: block; font-weight: 600; margin: 10px 0 4px; }
+  .linha { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+  .linha > * { flex: 1; min-width: 120px; }
+  .linha > .fixo { flex: 0 0 auto; min-width: 0; }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .chips button { min-height: 40px; padding: 4px 12px; }
+
+  .previa { min-height: 28px; margin: 8px 0; font-weight: 700; }
+  .previa.erro { color: var(--alerta); }
+  .previa.ok { color: var(--ok); }
+
+  /* listas */
+  .item { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--borda); }
+  .item:first-child { border-top: 0; }
+  .item .info { flex: 1; }
+  .item .grande { font-weight: 700; }
+  .vazio { color: var(--suave); padding: 10px 0; }
+
+  /* calendário do mês */
+  .dias { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+  .dia { border: 1px solid var(--borda); border-radius: 10px; padding: 4px 2px; text-align: center; min-height: 58px; background: var(--fundo); cursor: pointer; font-size: 14px; }
+  .dia b { display: block; font-size: 13px; color: var(--suave); }
+  .dia.tem { background: var(--marca-claro); border-color: var(--marca); }
+  .dia.tem span { font-weight: 800; font-size: 17px; }
+
+  .grade { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .grade > div { background: var(--fundo); border-radius: 10px; padding: 10px; }
+  .grade .rotulo { font-size: 14px; color: var(--suave); }
+  .grade .valor { font-size: 21px; font-weight: 800; }
+
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 9px 6px; text-align: right; border-top: 1px solid var(--borda); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 14px; color: var(--suave); border-top: 0; }
+  tr.clicavel { cursor: pointer; } tr.clicavel:hover { background: var(--marca-claro); }
+  tfoot td { font-weight: 800; }
+  .valores { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 14px; }
+  .valores .linha-v { display: flex; align-items: center; gap: 8px; }
+  .valores .linha-v b { width: 54px; font-size: 19px; }
+  .valores input { min-height: 44px; text-align: right; }
+  .valores input.mudou { border-color: var(--marca); background: var(--marca-claro); }
+
+  pre.relatorio { white-space: pre-wrap; background: var(--fundo); border-radius: 10px; padding: 12px; font: 15px/1.5 ui-monospace, Consolas, monospace; margin: 0 0 10px; }
+
+  @media (max-width: 480px) {
+    body { font-size: 17px; }
+    nav.abas { gap: 4px; }
+    nav.abas button { padding: 8px 4px; font-size: 14px; }
+    th, td { padding: 8px 3px; font-size: 13px; }
+    th { font-size: 12px; }
+    .faixa .valor { font-size: 18px; }
+    .mes-nav .nome { font-size: 17px; }
+  }
+
+  #aviso { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: 92%; padding: 12px 18px; border-radius: 12px; color: #fff; font-weight: 600; z-index: 20; display: none; }
+  #aviso.ok { background: var(--ok); } #aviso.erro { background: var(--alerta); }
+  [hidden] { display: none !important; }
+
+  #imprimir { display: none; }
+  @media print {
+    .app, #aviso { display: none !important; }
+    #imprimir { display: block; white-space: pre-wrap; font: 14pt/1.6 monospace; color: #000; background: #fff; }
+    body { background: #fff; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <h1>🪣 Calculadora da Bila</h1>
+
+  <div class="mes-nav">
+    <button id="mesAnt" title="Mês anterior" aria-label="Mês anterior">◀</button>
+    <div class="nome" id="mesNome">…</div>
+    <button id="mesProx" title="Próximo mês" aria-label="Próximo mês">▶</button>
+    <button id="mesHoje" class="mini">Hoje</button>
+  </div>
+
+  <div class="faixa" id="faixa"></div>
+
+  <nav class="abas" id="abas">
+    <button data-aba="lancar">Lançar</button>
+    <button data-aba="mes">Mês</button>
+    <button data-aba="pagamentos">Pagamentos</button>
+    <button data-aba="resumo">Resumo</button>
+    <button data-aba="ajustes">Ajustes</button>
+  </nav>
+
+  <!-- LANÇAR -->
+  <section id="aba-lancar">
+    <div class="cartao">
+      <h2>Novo lançamento</h2>
+      <div class="linha">
+        <div class="fixo" style="width:110px">
+          <label for="fDia">Dia</label>
+          <input type="number" id="fDia" min="1" max="31" inputmode="numeric">
+        </div>
+        <div>
+          <label for="fQtd">Baldes (como no caderno)</label>
+          <input type="text" id="fQtd" placeholder="ex: //  ou  //m  ou  2,5" autocomplete="off">
+        </div>
+      </div>
+      <div class="chips" id="chips"></div>
+      <div class="previa" id="previa"></div>
+      <div class="linha">
+        <button class="principal" id="btnSalvar">Salvar dia</button>
+        <button id="btnLimpar" class="fixo">Limpar</button>
+      </div>
+      <p class="suave">Digite os traços do caderno: <b>/</b> = 1 balde, <b>//</b> = 2, <b>//m</b> = 2 e meio, <b>m</b> = só meio. Também vale número: <b>2,5</b>.</p>
+    </div>
+    <div class="cartao">
+      <h2>Dias lançados</h2>
+      <div id="listaDias"></div>
+    </div>
+  </section>
+
+  <!-- MÊS -->
+  <section id="aba-mes" hidden>
+    <div class="cartao">
+      <h2>Fechamento do mês</h2>
+      <div class="grade" id="gradeMes"></div>
+    </div>
+    <div class="cartao">
+      <h2>Por tipo de dia</h2>
+      <div id="porTipo"></div>
+    </div>
+    <div class="cartao">
+      <h2>Calendário</h2>
+      <div class="dias" id="calendario"></div>
+      <p class="suave">Toque num dia para lançar ou corrigir.</p>
+    </div>
+    <div class="cartao">
+      <h2>Relatório</h2>
+      <pre class="relatorio" id="relatorio"></pre>
+      <div class="linha">
+        <button id="btnCopiar" class="principal">Copiar para o WhatsApp</button>
+        <button id="btnImprimir">Imprimir</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- PAGAMENTOS -->
+  <section id="aba-pagamentos" hidden>
+    <div class="cartao">
+      <h2>Registrar pagamento recebido</h2>
+      <div class="linha">
+        <div><label for="pData">Data</label><input type="date" id="pData"></div>
+        <div><label for="pValor">Valor (R$)</label><input type="text" id="pValor" inputmode="decimal" placeholder="ex: 1000 ou 350,50" autocomplete="off"></div>
+      </div>
+      <label for="pObs">Observação (opcional)</label>
+      <input type="text" id="pObs" maxlength="100" placeholder="ex: pix, dinheiro…" autocomplete="off">
+      <p></p>
+      <button class="principal" id="btnPagar">Salvar pagamento</button>
+    </div>
+    <div class="cartao">
+      <h2>Pagamentos deste mês</h2>
+      <div id="listaPag"></div>
+    </div>
+  </section>
+
+  <!-- RESUMO -->
+  <section id="aba-resumo" hidden>
+    <div class="cartao">
+      <h2>Todos os meses</h2>
+      <div id="tabelaResumo"></div>
+    </div>
+  </section>
+
+  <!-- AJUSTES -->
+  <section id="aba-ajustes" hidden>
+    <div class="cartao">
+      <h2>Ajustes</h2>
+      <label for="cPreco">Preço de 1 balde (R$)</label>
+      <input type="text" id="cPreco" inputmode="decimal">
+      <p class="suave">É a base da tabela abaixo. Vale para os próximos lançamentos; os dias já lançados mantêm o valor da época.</p>
+      <label for="cSaldo">Saldo anterior a receber (R$)</label>
+      <input type="text" id="cSaldo" inputmode="decimal">
+      <p class="suave">Quanto já faltava receber antes de começar a usar o sistema. Use negativo se ela já tinha crédito.</p>
+      <label style="display:flex;gap:10px;align-items:center;font-weight:400">
+        <input type="checkbox" id="cRede" style="width:24px;height:24px"> Permitir abrir pelo celular (mesma rede Wi-Fi)
+      </label>
+      <p class="suave" id="infoRede">Só vale depois de fechar e abrir o programa de novo.</p>
+    </div>
+    <div class="cartao">
+      <h2>Quanto vale cada tipo de dia</h2>
+      <p class="suave">Quantos reais ela recebe por um dia com essa quantidade de baldes. Você pode mudar qualquer valor. Linhas alteradas ficam marcadas.</p>
+      <div id="tabelaValores"></div>
+      <p></p>
+      <button id="btnPadrao">Voltar ao valor padrão</button>
+    </div>
+    <div class="cartao">
+      <button class="principal" id="btnConfig" style="width:100%">Salvar ajustes</button>
+    </div>
+  </section>
+</div>
+
+<div id="aviso" role="status"></div>
+<div id="imprimir"></div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+const moeda = (v) => brl.format(v);
+const qtdTxt = (b) => b.toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+const NOMES = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"];
+
+// elemento seguro (só textContent, nunca innerHTML com dados)
+function h(tag, props, ...filhos) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v);
+  }
+  for (const f of filhos.flat()) if (f != null) el.append(f);
+  return el;
+}
+
+const estado = { mes: null, dados: null, config: null, hoje: null, aba: "lancar" };
+
+// ── chamadas ao servidor ─────────────────────────────────────────────────────
+async function api(metodo, url, corpo) {
+  const opcoes = { method: metodo, headers: {} };
+  if (corpo !== undefined) { opcoes.headers["Content-Type"] = "application/json"; opcoes.body = JSON.stringify(corpo); }
+  let resp;
+  try { resp = await fetch("/api" + url, opcoes); }
+  catch { throw { erro: "Sem conexão com o programa. Ele ainda está aberto?" }; }
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw { ...json, status: resp.status };
+  return json;
+}
+
+let timerAviso;
+function aviso(texto, tipo = "ok") {
+  const el = $("aviso");
+  el.textContent = texto; el.className = tipo; el.style.display = "block";
+  clearTimeout(timerAviso); timerAviso = setTimeout(() => { el.style.display = "none"; }, tipo === "ok" ? 2200 : 5000);
+}
+const falha = (e) => aviso(e.erro || "Algo deu errado.", "erro");
+
+// ── meses ────────────────────────────────────────────────────────────────────
+function moverMes(chave, delta) {
+  let [a, m] = chave.split("-").map(Number);
+  m += delta; while (m < 1) { m += 12; a--; } while (m > 12) { m -= 12; a++; }
+  return `${a}-${String(m).padStart(2, "0")}`;
+}
+const nomeMes = (c) => { const [a, m] = c.split("-").map(Number); return `${NOMES[m - 1]} de ${a}`; };
+
+async function carregarMes() {
+  try { estado.dados = await api("GET", "/mes/" + estado.mes); }
+  catch (e) { falha(e); return; }
+  desenharTudo();
+}
+
+function desenharTudo() {
+  const d = estado.dados;
+  $("mesNome").textContent = nomeMes(estado.mes);
+  desenharFaixa(d);
+  desenharLista(d);
+  desenharMes(d);
+  desenharPagamentos(d);
+  if (!$("fDia").dataset.tocado) $("fDia").value = diaSugerido(d);
+  atualizarPrevia();
+}
+
+function diaSugerido(d) {
+  const feitos = new Set(d.entradas.map((e) => e.dia));
+  let ini = estado.mes === estado.hoje.slice(0, 7) ? Number(estado.hoje.slice(8)) : 1;
+  for (let x = ini; x <= d.diasNoMes; x++) if (!feitos.has(x)) return x;
+  return Math.min(ini, d.diasNoMes);
+}
+
+function situacao(saldo) {
+  if (saldo > 0) return { classe: "falta", rotulo: "Falta receber", valor: moeda(saldo) };
+  if (saldo < 0) return { classe: "credito", rotulo: "Pago a mais", valor: moeda(-saldo) };
+  return { classe: "quitado", rotulo: "Situação", valor: "Quitado ✔" };
+}
+
+function desenharFaixa(d) {
+  const s = situacao(d.saldoFinal);
+  $("faixa").replaceChildren(
+    h("div", {}, h("div", { class: "rotulo" }, "Baldes no mês"), h("div", { class: "valor" }, qtdTxt(d.totalBaldes))),
+    h("div", {}, h("div", { class: "rotulo" }, "Valor do mês"), h("div", { class: "valor" }, moeda(d.ganho))),
+    h("div", { class: s.classe }, h("div", { class: "rotulo" }, s.rotulo), h("div", { class: "valor" }, s.valor)),
+  );
+}
+
+// ── aba Lançar ───────────────────────────────────────────────────────────────
+function desenharLista(d) {
+  const alvo = $("listaDias");
+  if (!d.entradas.length) { alvo.replaceChildren(h("div", { class: "vazio" }, "Nenhum dia lançado neste mês.")); return; }
+  alvo.replaceChildren(...d.entradas.map((e) =>
+    h("div", { class: "item" },
+      h("div", { class: "info" },
+        h("div", { class: "grande" }, `Dia ${e.dia} — ${qtdTxt(e.baldes)} ${e.baldes === 1 ? "balde" : "baldes"}`),
+        h("div", { class: "suave" }, `Valor do dia: ${moeda(e.valor)}`)),
+      h("button", { class: "mini", onclick: () => editarDia(e) }, "Corrigir"),
+      h("button", { class: "mini perigo", onclick: () => apagarDia(e) }, "Apagar"))));
+}
+
+function editarDia(e) {
+  $("fDia").value = e.dia; $("fDia").dataset.tocado = "1";
+  $("fQtd").value = qtdTxt(e.baldes);
+  mostrarAba("lancar"); atualizarPrevia(); $("fQtd").focus(); $("fQtd").select();
+}
+
+async function apagarDia(e) {
+  if (!confirm(`Apagar o dia ${e.dia} (${qtdTxt(e.baldes)} baldes)?`)) return;
+  try { await api("DELETE", `/mes/${estado.mes}/entradas/${e.dia}`); aviso("Dia apagado."); await carregarMes(); }
+  catch (x) { falha(x); }
+}
+
+// mesma leitura que o servidor faz (aqui só para mostrar a prévia)
+function lerQtd(t) {
+  t = t.trim().toLowerCase();
+  if (!t) return { vazio: true };
+  const m = t.match(/^(\d+(?:[.,]\d+)?)?\s*([/|]*)\s*(m|meio|meia|½)?$/);
+  if (!m) return { erro: "Não entendi. Use traços (//), m para meio (//m) ou número (2,5)." };
+  const total = (m[1] ? parseFloat(m[1].replace(",", ".")) : 0) + m[2].length + (m[3] ? 0.5 : 0);
+  if (total <= 0) return { erro: "A quantidade precisa ser maior que zero." };
+  if (total > 200) return { erro: "Quantidade muito grande." };
+  if ((total * 2) % 1 !== 0) return { erro: "Use baldes inteiros ou com meio (2 ou 2,5)." };
+  return { baldes: total };
+}
+
+// mesma regra padrão do servidor (usada na prévia e ao mudar o preço do balde)
+function padraoJS(q, preco) {
+  const inteiros = Math.floor(q), meio = q - inteiros >= 0.5;
+  const v = inteiros === 0 ? preco / 2 : inteiros === 1 ? preco : inteiros * preco + (meio ? preco / 2 : 0);
+  return Math.round(v * 100) / 100;
+}
+function valorDoDia(q) {
+  const linha = estado.config.tabela.find((l) => l.qtd === q);
+  return linha ? linha.valor : padraoJS(q, estado.config.preco);
+}
+
+function atualizarPrevia() {
+  const p = $("previa"), d = estado.dados;
+  if (!d || !estado.config) return;
+  const dia = parseInt($("fDia").value, 10);
+  const q = lerQtd($("fQtd").value);
+  p.className = "previa";
+  if (q.vazio) { p.textContent = ""; return; }
+  if (q.erro) { p.textContent = q.erro; p.classList.add("erro"); return; }
+  if (!(dia >= 1 && dia <= d.diasNoMes)) { p.textContent = `O dia precisa estar entre 1 e ${d.diasNoMes}.`; p.classList.add("erro"); return; }
+  const ja = d.entradas.find((e) => e.dia === dia);
+  let t = `Dia ${dia}: ${qtdTxt(q.baldes)} ${q.baldes === 1 ? "balde" : "baldes"} = ${moeda(valorDoDia(q.baldes))}`;
+  if (ja) t += `  (já tinha ${qtdTxt(ja.baldes)} — vai trocar)`;
+  p.textContent = t; p.classList.add("ok");
+}
+
+async function salvarDia() {
+  const dia = parseInt($("fDia").value, 10);
+  if (!(dia >= 1)) { aviso("Informe o dia.", "erro"); return; }
+  const qtd = $("fQtd").value;
+  try {
+    try { await api("POST", `/mes/${estado.mes}/entradas`, { dia, qtd, substituir: false }); }
+    catch (e) {
+      if (e.status === 409 && confirm(`${e.erro}\n\nTrocar pelo novo valor?`)) await api("POST", `/mes/${estado.mes}/entradas`, { dia, qtd, substituir: true });
+      else throw e.status === 409 ? { erro: "Nada foi alterado." } : e;
+    }
+    aviso(`Dia ${dia} salvo.`);
+    $("fQtd").value = ""; delete $("fDia").dataset.tocado;
+    await carregarMes();
+    $("fDia").value = Math.min(dia + 1, estado.dados.diasNoMes); $("fDia").dataset.tocado = "1";
+    atualizarPrevia(); $("fQtd").focus();
+  } catch (e) { falha(e); }
+}
+
+// ── aba Mês ──────────────────────────────────────────────────────────────────
+function caixa(rotulo, valor) { return h("div", {}, h("div", { class: "rotulo" }, rotulo), h("div", { class: "valor" }, valor)); }
+
+async function desenharMes(d) {
+  const s = situacao(d.saldoFinal);
+  $("gradeMes").replaceChildren(
+    caixa("Total de baldes", qtdTxt(d.totalBaldes)),
+    caixa("Valor produzido", moeda(d.ganho)),
+    caixa("Dias trabalhados", String(d.diasTrabalhados)),
+    caixa("Média por dia", d.diasTrabalhados ? qtdTxt(d.mediaBaldes) + " baldes" : "—"),
+    caixa("Saldo anterior", moeda(d.saldoAnterior)),
+    caixa("Recebido no mês", moeda(d.pago)),
+    caixa(s.rotulo, s.valor),
+  );
+  $("porTipo").replaceChildren(d.porTipo.length
+    ? h("table", {},
+        h("thead", {}, h("tr", {}, h("th", {}, "Tipo de dia"), h("th", {}, "Dias"), h("th", {}, "Valor"))),
+        h("tbody", {}, d.porTipo.map((t) => h("tr", {}, h("td", {}, `${qtdTxt(t.qtd)} ${t.qtd === 1 ? "balde" : "baldes"}`), h("td", {}, String(t.dias)), h("td", {}, moeda(t.valor))))),
+        h("tfoot", {}, h("tr", {}, h("td", {}, "Total"), h("td", {}, String(d.diasTrabalhados)), h("td", {}, moeda(d.ganho)))))
+    : h("div", { class: "vazio" }, "Nenhum dia lançado neste mês."));
+  const porDia = new Map(d.entradas.map((e) => [e.dia, e]));
+  const cal = [];
+  for (let x = 1; x <= d.diasNoMes; x++) {
+    const e = porDia.get(x);
+    cal.push(h("div", { class: "dia" + (e ? " tem" : ""), role: "button", tabindex: "0",
+      onclick: () => irParaDia(x), onkeydown: (ev) => { if (ev.key === "Enter") irParaDia(x); } },
+      h("b", {}, String(x)), h("span", {}, e ? qtdTxt(e.baldes) : "·")));
+  }
+  $("calendario").replaceChildren(...cal);
+  try {
+    const r = await api("GET", `/mes/${estado.mes}/relatorio`);
+    $("relatorio").textContent = r.texto; $("imprimir").textContent = r.texto.replaceAll("*", "");
+  } catch (e) { falha(e); }
+}
+
+function irParaDia(x) {
+  $("fDia").value = x; $("fDia").dataset.tocado = "1";
+  const e = estado.dados.entradas.find((v) => v.dia === x);
+  $("fQtd").value = e ? qtdTxt(e.baldes) : "";
+  mostrarAba("lancar"); atualizarPrevia(); $("fQtd").focus();
+}
+
+// ── aba Pagamentos ───────────────────────────────────────────────────────────
+function desenharPagamentos(d) {
+  const alvo = $("listaPag");
+  if (!d.pagamentos.length) { alvo.replaceChildren(h("div", { class: "vazio" }, "Nenhum pagamento neste mês.")); return; }
+  alvo.replaceChildren(...d.pagamentos.map((p) => {
+    const [a, m, dd] = p.data.split("-");
+    return h("div", { class: "item" },
+      h("div", { class: "info" },
+        h("div", { class: "grande" }, `${dd}/${m}/${a} — ${moeda(p.valor)}`),
+        p.obs ? h("div", { class: "suave" }, p.obs) : null),
+      h("button", { class: "mini perigo", onclick: () => apagarPagamento(p) }, "Apagar"));
+  }));
+}
+
+function lerValor(t) {
+  const limpo = t.trim().replace(/^R\$\s*/i, "").replace(/\./g, "").replace(",", ".");
+  const v = Number(limpo);
+  return limpo !== "" && Number.isFinite(v) ? v : null;
+}
+
+async function salvarPagamento() {
+  const valor = lerValor($("pValor").value);
+  if (valor === null || valor <= 0) { aviso("Digite um valor válido (ex: 1000 ou 350,50).", "erro"); return; }
+  if (!$("pData").value) { aviso("Escolha a data.", "erro"); return; }
+  try {
+    await api("POST", "/pagamentos", { data: $("pData").value, valor, obs: $("pObs").value });
+    aviso("Pagamento salvo."); $("pValor").value = ""; $("pObs").value = "";
+    const mesDoPag = $("pData").value.slice(0, 7);
+    if (mesDoPag !== estado.mes) { estado.mes = mesDoPag; }
+    await carregarMes();
+  } catch (e) { falha(e); }
+}
+
+async function apagarPagamento(p) {
+  if (!confirm(`Apagar o pagamento de ${moeda(p.valor)} do dia ${p.data.split("-").reverse().join("/")}?`)) return;
+  try { await api("DELETE", `/pagamentos/${estado.mes}/${p.id}`); aviso("Pagamento apagado."); await carregarMes(); }
+  catch (e) { falha(e); }
+}
+
+// ── aba Resumo ───────────────────────────────────────────────────────────────
+async function carregarResumo() {
+  let r;
+  try { r = await api("GET", "/resumo"); } catch (e) { falha(e); return; }
+  const alvo = $("tabelaResumo");
+  if (!r.meses.length) { alvo.replaceChildren(h("div", { class: "vazio" }, "Ainda não há lançamentos.")); return; }
+  const th = (t) => h("th", {}, t);
+  const td = (t) => h("td", {}, t);
+  const linhas = r.meses.map((m) => h("tr", { class: "clicavel", onclick: () => { estado.mes = m.chave; mostrarAba("mes"); carregarMes(); } },
+    td(m.nome), td(qtdTxt(m.baldes)), td(moeda(m.ganho)), td(moeda(m.pago)), td(moeda(m.saldoFinal))));
+  const s = situacao(r.saldo);
+  alvo.replaceChildren(h("div", { style: "overflow-x:auto" }, h("table", {},
+    h("thead", {}, h("tr", {}, th("Mês"), th("Baldes"), th("Produzido"), th("Recebido"), th("Saldo"))),
+    h("tbody", {}, linhas),
+    h("tfoot", {}, h("tr", {}, td("Total"), td(qtdTxt(r.totalBaldes)), td(moeda(r.ganho)), td(moeda(r.pago)), td(moeda(r.saldo)))))),
+    h("p", { class: "suave" }, r.saldoInicial ? `Inclui saldo anterior de ${moeda(r.saldoInicial)}. ` : "",
+      `${r.diasTrabalhados} dias trabalhados. Situação geral: ${s.rotulo} ${s.valor}.`),
+    h("p", { class: "suave" }, "Toque num mês para ver os detalhes."));
+}
+
+// ── Ajustes ──────────────────────────────────────────────────────────────────
+async function carregarConfig() {
+  estado.config = await api("GET", "/config");
+  const c = estado.config;
+  $("cPreco").value = String(c.preco).replace(".", ",");
+  $("cSaldo").value = String(c.saldoInicial).replace(".", ",");
+  $("cRede").checked = c.acessoRede;
+  desenharTabelaValores(c.tabela.map((l) => ({ ...l })), c.preco);
+  const info = await api("GET", "/info");
+  $("infoRede").textContent = c.acessoRede && info.ips.length
+    ? "No celular (mesma rede Wi-Fi), abra: " + info.ips.map((ip) => `http://${ip}:${location.port}`).join("  ou  ")
+    : "Só vale depois de fechar e abrir o programa de novo.";
+}
+
+const fmtNum = (v) => String(v).replace(".", ",");
+let precoDaTabela = 0;   // preço usado para calcular o "padrão" que a tabela mostra agora
+
+function desenharTabelaValores(linhas, preco) {
+  precoDaTabela = preco;
+  const rotulo = (q) => qtdTxt(q).replace(",5", "½").replace(/^0½/, "½");
+  $("tabelaValores").replaceChildren(h("div", { class: "valores" }, linhas.map((l) => {
+    const inp = h("input", { type: "text", inputmode: "decimal", "data-qtd": String(l.qtd), "data-padrao": String(l.padrao), "aria-label": `Valor do dia com ${rotulo(l.qtd)} baldes`, value: fmtNum(l.valor) });
+    inp.addEventListener("input", () => marcarMudanca(inp));
+    marcarMudanca(inp);
+    return h("div", { class: "linha-v" }, h("b", {}, rotulo(l.qtd)), inp);
+  })));
+}
+
+function marcarMudanca(inp) {
+  const v = lerValor(inp.value);
+  inp.classList.toggle("mudou", v === null || Math.abs(v - Number(inp.dataset.padrao)) > 0.004);
+}
+
+// Mudou o preço do balde: as linhas que ainda seguiam o padrão acompanham o novo preço
+function precoMudou() {
+  const novo = lerValor($("cPreco").value);
+  if (novo === null || novo <= 0) return;
+  for (const inp of $("tabelaValores").querySelectorAll("input")) {
+    const q = Number(inp.dataset.qtd), v = lerValor(inp.value);
+    const seguiaPadrao = v !== null && Math.abs(v - padraoJS(q, precoDaTabela)) < 0.004;
+    inp.dataset.padrao = String(padraoJS(q, novo));
+    if (seguiaPadrao) inp.value = fmtNum(padraoJS(q, novo));
+    marcarMudanca(inp);
+  }
+  precoDaTabela = novo;
+}
+
+function voltarAoPadrao() {
+  for (const inp of $("tabelaValores").querySelectorAll("input")) { inp.value = fmtNum(inp.dataset.padrao); marcarMudanca(inp); }
+}
+
+async function salvarConfig() {
+  const preco = lerValor($("cPreco").value), saldo = lerValor($("cSaldo").value || "0");
+  if (preco === null || preco <= 0) { aviso("Preço inválido.", "erro"); return; }
+  if (saldo === null) { aviso("Saldo anterior inválido.", "erro"); return; }
+  const tabela = [];
+  for (const inp of $("tabelaValores").querySelectorAll("input")) {
+    const v = lerValor(inp.value);
+    if (v === null || v < 0) { aviso(`Valor inválido na linha de ${qtdTxt(Number(inp.dataset.qtd))} balde(s).`, "erro"); inp.focus(); return; }
+    tabela.push({ qtd: Number(inp.dataset.qtd), valor: v });
+  }
+  try {
+    await api("PUT", "/config", { preco, saldoInicial: saldo, acessoRede: $("cRede").checked, tabela });
+    aviso("Ajustes salvos."); await carregarConfig(); await carregarMes();
+  } catch (e) { falha(e); }
+}
+
+// ── abas ─────────────────────────────────────────────────────────────────────
+function mostrarAba(nome) {
+  estado.aba = nome;
+  for (const b of document.querySelectorAll("#abas button")) b.classList.toggle("ativa", b.dataset.aba === nome);
+  for (const s of document.querySelectorAll("section")) s.hidden = s.id !== "aba-" + nome;
+  if (nome === "resumo") carregarResumo();
+  if (nome === "ajustes") carregarConfig().catch(falha);
+}
+
+// ── início ───────────────────────────────────────────────────────────────────
+async function iniciar() {
+  for (const b of document.querySelectorAll("#abas button")) b.addEventListener("click", () => mostrarAba(b.dataset.aba));
+  $("chips").replaceChildren(...[["½", "m"], ["1", "/"], ["1½", "/m"], ["2", "//"], ["2½", "//m"], ["3", "///"], ["3½", "///m"], ["4", "////"]]
+    .map(([r, v]) => h("button", { type: "button", onclick: () => { $("fQtd").value = v; atualizarPrevia(); $("fQtd").focus(); } }, r)));
+  $("mesAnt").onclick = () => { estado.mes = moverMes(estado.mes, -1); delete $("fDia").dataset.tocado; carregarMes(); };
+  $("mesProx").onclick = () => { estado.mes = moverMes(estado.mes, 1); delete $("fDia").dataset.tocado; carregarMes(); };
+  $("mesHoje").onclick = () => { estado.mes = estado.hoje.slice(0, 7); delete $("fDia").dataset.tocado; carregarMes(); };
+  $("fQtd").addEventListener("input", atualizarPrevia);
+  $("fDia").addEventListener("input", () => { $("fDia").dataset.tocado = "1"; atualizarPrevia(); });
+  $("fQtd").addEventListener("keydown", (e) => { if (e.key === "Enter") salvarDia(); });
+  $("btnSalvar").onclick = salvarDia;
+  $("btnLimpar").onclick = () => { $("fQtd").value = ""; delete $("fDia").dataset.tocado; if (estado.dados) $("fDia").value = diaSugerido(estado.dados); atualizarPrevia(); };
+  $("btnPagar").onclick = salvarPagamento;
+  $("pValor").addEventListener("keydown", (e) => { if (e.key === "Enter") salvarPagamento(); });
+  $("btnConfig").onclick = salvarConfig;
+  $("btnPadrao").onclick = voltarAoPadrao;
+  $("cPreco").addEventListener("input", precoMudou);
+  $("btnImprimir").onclick = () => window.print();
+  $("btnCopiar").onclick = async () => {
+    try { await navigator.clipboard.writeText($("relatorio").textContent); aviso("Copiado! Cole no WhatsApp."); }
+    catch { const r = document.createRange(); r.selectNodeContents($("relatorio")); getSelection().removeAllRanges(); getSelection().addRange(r); aviso("Selecionado — use Ctrl+C para copiar.", "erro"); }
+  };
+
+  try {
+    const info = await api("GET", "/info");
+    estado.hoje = info.hoje; estado.mes = info.hoje.slice(0, 7);
+    $("pData").value = info.hoje;
+    await carregarConfig();
+  } catch (e) { falha(e); return; }
+  mostrarAba("lancar");
+  await carregarMes();
+}
+iniciar();
+</script>
+</body>
+</html>

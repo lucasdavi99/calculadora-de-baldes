@@ -1,163 +1,163 @@
-import java.util.Locale
+import com.sun.net.httpserver.HttpExchange
+import com.sun.net.httpserver.HttpServer
+import java.io.File
+import java.net.BindException
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.NetworkInterface
+import java.time.LocalDate
+import java.util.concurrent.Executors
 
-// ── Cores ANSI ────────────────────────────────────────────────────────────────
-object C {
-    const val RESET   = "\u001B[0m"
-    const val BOLD    = "\u001B[1m"
-    const val VERDE   = "\u001B[32m"
-    const val AMARELO = "\u001B[33m"
-    const val CIANO   = "\u001B[36m"
-    const val VERMELHO= "\u001B[31m"
-    const val BRANCO  = "\u001B[97m"
-    const val ROXO    = "\u001B[35m"
+// Pasta do programa: a que contém "web/index.html" (funciona rodando pela IDE ou pelo .bat)
+fun acharPastaBase(): File {
+    val atual = File(System.getProperty("user.dir"))
+    val candidatas = listOf(atual, File(atual, "Calculadora bila"), atual.parentFile, atual.parentFile?.let { File(it, "Calculadora bila") })
+    return candidatas.filterNotNull().firstOrNull { File(it, "web/index.html").exists() }
+        ?: error("Não encontrei a pasta 'web' (index.html). Rode o programa de dentro da pasta do projeto.")
 }
 
-// ── Preços ────────────────────────────────────────────────────────────────────
-val baldes = listOf(
-    Triple("Meio Balde",   "½",  17.50),
-    Triple("Um Balde",     "1",  35.00),
-    Triple("Um Balde e meio, Dois Baldes",  "2",  70.00),
-    Triple("Três Baldes",  "3",  105.00),
-)
+fun ipsDaRede(): List<String> = try {
+    NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback && !it.isVirtual }
+        .flatMap { it.inetAddresses.toList() }
+        .filter { it is java.net.Inet4Address && it.isSiteLocalAddress }
+        .map { it.hostAddress }
+} catch (_: Exception) { emptyList() }
 
-val localeBR = Locale.forLanguageTag("pt-BR")
+fun main(args: Array<String>) {
+    val base = acharPastaBase()
+    val arm = Armazem(base)
+    val servico = Servico(arm)
+    val cfg = arm.config()
+    val enderecoLocal: InetAddress = if (cfg.acessoRede) InetAddress.getByName("0.0.0.0") else InetAddress.getLoopbackAddress()
 
-// ── Formatação ────────────────────────────────────────────────────────────────
-fun moeda(valor: Double): String = "R$ %,.2f".format(valor).replace(",", "X").replace(".", ",").replace("X", ".")
+    var servidor: HttpServer? = null
+    var porta = 8080
+    while (servidor == null && porta < 8100) {
+        try { servidor = HttpServer.create(InetSocketAddress(enderecoLocal, porta), 0) } catch (_: BindException) { porta++ }
+    }
+    if (servidor == null) error("Não consegui abrir nenhuma porta entre 8080 e 8099.")
 
-fun limparTela() = print("\u001B[2J\u001B[H")
+    val portaFinal = porta
+    servidor.createContext("/") { ex -> atender(ex, base, arm, servico) }
+    servidor.executor = Executors.newFixedThreadPool(4)
+    servidor.start()
 
-// ── Header ────────────────────────────────────────────────────────────────────
-fun exibirHeader() {
+    val url = "http://localhost:$portaFinal"
     println()
-    println("${C.CIANO}${C.BOLD}  ╔══════════════════════════════════╗${C.RESET}")
-    println("${C.CIANO}${C.BOLD}  ║   \uD83E\uDDF4  Calculadora da Bila        ║${C.RESET}")
-    println("${C.CIANO}${C.BOLD}  ║       Produção de Baldes         ║${C.RESET}")
-    println("${C.CIANO}${C.BOLD}  ╚══════════════════════════════════╝${C.RESET}")
+    println("  Calculadora da Bila rodando em  $url")
+    if (cfg.acessoRede) ipsDaRede().forEach { println("  No celular (mesma rede Wi-Fi):  http://$it:$portaFinal") }
+    println("  Dados salvos em: ${File(base, "data").absolutePath}")
+    println("  Para encerrar, feche esta janela (ou Ctrl+C).")
     println()
+
+    if ("--sem-navegador" !in args) {
+        try { java.awt.Desktop.getDesktop().browse(java.net.URI(url)) }
+        catch (_: Throwable) { println("  Abra o endereço acima no navegador.") }
+    }
 }
 
-// ── Leitura com validação ─────────────────────────────────────────────────────
-fun lerQuantidade(label: String, icone: String): Int {
-    while (true) {
-        print("  ${C.AMARELO}${C.BOLD}$icone  Quantidade de $label: ${C.RESET}")
-        val entrada = readln().trim()
-        val valor = entrada.toIntOrNull()
-        when {
-            valor == null -> println("  ${C.VERMELHO}✗  Digite apenas números inteiros.${C.RESET}")
-            valor < 0     -> println("  ${C.VERMELHO}✗  A quantidade não pode ser negativa.${C.RESET}")
-            else          -> { println(); return valor }
+// ── Roteamento ────────────────────────────────────────────────────────────────
+private fun atender(ex: HttpExchange, base: File, arm: Armazem, sv: Servico) {
+    try {
+        ex.responseHeaders.add("X-Content-Type-Options", "nosniff")
+        ex.responseHeaders.add("Cache-Control", "no-store")
+        ex.responseHeaders.add("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'none'")
+
+        verificarOrigem(ex, arm.config().acessoRede)
+
+        val metodo = ex.requestMethod
+        val caminho = ex.requestURI.path
+        if (metodo == "GET" && (caminho == "/" || caminho == "/index.html")) {
+            responder(ex, 200, File(base, "web/index.html").readBytes(), "text/html; charset=utf-8")
+            return
         }
+        if (!caminho.startsWith("/api/")) throw ErroNegocio(404, "Não encontrado.")
+
+        val partes = caminho.removePrefix("/api/").split('/').filter { it.isNotEmpty() }
+        val corpo: Map<*, *> = if (metodo == "POST" || metodo == "PUT") lerCorpo(ex) else emptyMap<String, Any?>()
+        val resposta: Any? = rota(metodo, partes, corpo, arm, sv)
+        responder(ex, 200, Json.escrever(resposta).toByteArray(Charsets.UTF_8), "application/json; charset=utf-8")
+    } catch (e: ErroNegocio) {
+        val m = linkedMapOf<String, Any?>("erro" to e.message)
+        m.putAll(e.extra)
+        responder(ex, e.status, Json.escrever(m).toByteArray(Charsets.UTF_8), "application/json; charset=utf-8")
+    } catch (e: Exception) {
+        e.printStackTrace()
+        responder(ex, 500, Json.escrever(mapOf("erro" to "Erro interno: ${e.message}")).toByteArray(Charsets.UTF_8), "application/json; charset=utf-8")
+    } finally {
+        ex.close()
     }
 }
 
-// ── Subtração de valores recebidos ────────────────────────────────────────────
-fun lerValorMonetario(label: String): Double {
-    while (true) {
-        print("  ${C.AMARELO}${C.BOLD}💰  $label: ${C.RESET}")
-        val entrada = readln().trim().replace(",", ".")
-        val valor = entrada.toDoubleOrNull()
-        when {
-            valor == null -> println("  ${C.VERMELHO}✗  Digite um valor numérico válido (ex: 35 ou 17,50).${C.RESET}")
-            valor < 0     -> println("  ${C.VERMELHO}✗  O valor não pode ser negativo.${C.RESET}")
-            else          -> { println(); return valor }
+private fun rota(metodo: String, p: List<String>, corpo: Map<*, *>, arm: Armazem, sv: Servico): Any? {
+    fun num(k: String): Double = (corpo[k] as? Number)?.toDouble() ?: throw ErroNegocio(400, "Campo \"$k\" ausente ou inválido.")
+    fun txt(k: String): String = corpo[k] as? String ?: ""
+
+    when {
+        // Informações gerais
+        metodo == "GET" && p == listOf("info") -> {
+            val c = arm.config()
+            return mapOf("hoje" to LocalDate.now().toString(), "ips" to (if (c.acessoRede) ipsDaRede() else emptyList()))
         }
-    }
-}
-
-fun exibirAbatimento(total: Double) {
-    val recebido = lerValorMonetario("Valor recebido para abater a dívida")
-    val saldo = total - recebido
-    val largura = 45
-
-    println("  ${C.ROXO}${C.BOLD}┌${"─".repeat(largura)}┐${C.RESET}")
-    println("  ${C.ROXO}${C.BOLD}│${"ABATIMENTO DA DÍVIDA".padStart((largura + 20) / 2).padEnd(largura)}│${C.RESET}")
-    println("  ${C.ROXO}${C.BOLD}├${"─".repeat(largura)}┤${C.RESET}")
-
-    val totalLabel   = " Total da dívida:    "
-    val totalStr     = moeda(total)
-    val espTotal     = largura - totalLabel.length - totalStr.length - 1
-    println("  ${C.BRANCO}${C.BOLD}│$totalLabel${" ".repeat(espTotal)}$totalStr │${C.RESET}")
-
-    val recLabel     = " Valor recebido:     "
-    val recStr       = moeda(recebido)
-    val espRec       = largura - recLabel.length - recStr.length - 1
-    println("  ${C.BRANCO}${C.BOLD}│$recLabel${" ".repeat(espRec)}$recStr │${C.RESET}")
-
-    println("  ${C.ROXO}${C.BOLD}├${"─".repeat(largura)}┤${C.RESET}")
-
-    if (saldo <= 0) {
-        val quitadoStr = if (saldo < 0) "(sobra ${moeda(-saldo)})" else ""
-        val msg = " Dívida QUITADA! $quitadoStr"
-        println("  ${C.VERDE}${C.BOLD}│$msg${" ".repeat(largura - msg.length)} │${C.RESET}")
-    } else {
-        val saldoLabel = " Saldo restante:     "
-        val saldoStr   = moeda(saldo)
-        val espSaldo   = largura - saldoLabel.length - saldoStr.length - 1
-        println("  ${C.VERMELHO}${C.BOLD}│$saldoLabel${" ".repeat(espSaldo)}$saldoStr │${C.RESET}")
-    }
-
-    println("  ${C.ROXO}${C.BOLD}└${"─".repeat(largura)}┘${C.RESET}")
-    println()
-}
-
-// ── Tabela de resultado ───────────────────────────────────────────────────────
-fun exibirTabela(quantidades: List<Int>): Double {
-    val largura = 45
-
-    println()
-    println("  ${C.VERDE}${C.BOLD}┌${"─".repeat(largura)}┐${C.RESET}")
-    println("  ${C.VERDE}${C.BOLD}│${"RESUMO DO DIA".padStart((largura + 13) / 2).padEnd(largura)}│${C.RESET}")
-    println("  ${C.VERDE}${C.BOLD}├${"─".repeat(18)}┬${"─".repeat(8)}┬${"─".repeat(largura - 27)}┤${C.RESET}")
-    println("  ${C.VERDE}${C.BOLD}│ ${"Tipo".padEnd(16)} │ ${"Qtd".padEnd(6)} │ ${"Valor".padEnd(largura - 30)} │${C.RESET}")
-    println("  ${C.VERDE}${C.BOLD}├${"─".repeat(18)}┼${"─".repeat(8)}┼${"─".repeat(largura - 27)}┤${C.RESET}")
-
-    var total = 0.0
-    baldes.forEachIndexed { i, (nome, _, preco) ->
-        val qtd = quantidades[i]
-        val subtotal = qtd * preco
-        total += subtotal
-        val nomeCol  = nome.padEnd(16)
-        val qtdCol   = qtd.toString().padStart(4).padEnd(6)
-        val valorCol = moeda(subtotal).padStart(largura - 30)
-        println("  ${C.BRANCO}│ $nomeCol │ $qtdCol │ $valorCol │${C.RESET}")
-    }
-
-    println("  ${C.VERDE}${C.BOLD}├${"─".repeat(18)}┴${"─".repeat(8)}┴${"─".repeat(largura - 27)}┤${C.RESET}")
-
-    val totalStr = moeda(total)
-    val espaco = largura - 6 - totalStr.length - 1
-    println("  ${C.VERDE}${C.BOLD}│ TOTAL${" ".repeat(espaco)}$totalStr │${C.RESET}")
-    println("  ${C.VERDE}${C.BOLD}└${"─".repeat(largura)}┘${C.RESET}")
-    println()
-    return total
-}
-
-// ── Pergunta de repetição ─────────────────────────────────────────────────────
-fun perguntarReiniciar(): Boolean {
-    while (true) {
-        print("  ${C.ROXO}${C.BOLD}↩  Calcular outro dia? (s/n): ${C.RESET}")
-        when (readln().trim().lowercase()) {
-            "s", "sim" -> { println(); return true  }
-            "n", "nao", "não" -> return false
-            else -> println("  ${C.VERMELHO}✗  Digite 's' para sim ou 'n' para não.${C.RESET}")
+        metodo == "GET" && p == listOf("config") -> return sv.configParaTela()
+        metodo == "PUT" && p == listOf("config") -> {
+            val tabela = (corpo["tabela"] as? List<*>)?.map {
+                val l = it as? Map<*, *> ?: throw ErroNegocio(400, "Tabela inválida.")
+                val q = (l["qtd"] as? Number)?.toDouble(); val v = (l["valor"] as? Number)?.toDouble()
+                if (q == null || v == null) throw ErroNegocio(400, "Tabela inválida.")
+                q to v
+            } ?: emptyList()
+            sv.salvarConfig(num("preco"), num("saldoInicial"), corpo["acessoRede"] as? Boolean ?: false, tabela)
+            return mapOf("ok" to true)
         }
+        // Mês
+        metodo == "GET" && p.size == 2 && p[0] == "mes" -> return sv.resumoMes(p[1])
+        metodo == "GET" && p.size == 3 && p[0] == "mes" && p[2] == "relatorio" -> return mapOf("texto" to sv.relatorio(p[1]))
+        metodo == "POST" && p.size == 3 && p[0] == "mes" && p[2] == "entradas" ->
+            return sv.salvarEntrada(p[1], num("dia").toInt(), txt("qtd"), corpo["substituir"] as? Boolean ?: false)
+        metodo == "DELETE" && p.size == 4 && p[0] == "mes" && p[2] == "entradas" -> {
+            sv.apagarEntrada(p[1], p[3].toIntOrNull() ?: throw ErroNegocio(400, "Dia inválido."))
+            return mapOf("ok" to true)
+        }
+        // Pagamentos
+        metodo == "POST" && p == listOf("pagamentos") -> {
+            sv.salvarPagamento(txt("data"), num("valor"), txt("obs"))
+            return mapOf("ok" to true)
+        }
+        metodo == "DELETE" && p.size == 3 && p[0] == "pagamentos" -> {
+            sv.apagarPagamento(p[1].also { arm.validarChave(it) }, p[2].toLongOrNull() ?: throw ErroNegocio(400, "Pagamento inválido."))
+            return mapOf("ok" to true)
+        }
+        // Resumo geral
+        metodo == "GET" && p == listOf("resumo") -> return sv.resumoGeral()
+    }
+    throw ErroNegocio(404, "Não encontrado.")
+}
+
+// ── Segurança básica (o servidor só atende a própria página) ──────────────────
+private fun verificarOrigem(ex: HttpExchange, acessoRede: Boolean) {
+    val host = ex.requestHeaders.getFirst("Host") ?: throw ErroNegocio(400, "Requisição inválida.")
+    val nomeHost = host.substringBeforeLast(':').removeSurrounding("[", "]")
+    if (!acessoRede && nomeHost !in setOf("localhost", "127.0.0.1", "::1"))
+        throw ErroNegocio(403, "Acesso não permitido.")
+    val origem = ex.requestHeaders.getFirst("Origin")
+    if (origem != null && origem != "http://$host") throw ErroNegocio(403, "Origem não permitida.")
+    if (ex.requestMethod in setOf("POST", "PUT")) {
+        val tipo = ex.requestHeaders.getFirst("Content-Type") ?: ""
+        if (!tipo.startsWith("application/json")) throw ErroNegocio(415, "Tipo de conteúdo não aceito.")
     }
 }
 
-// ── Main ──────────────────────────────────────────────────────────────────────
-fun main() {
-    do {
-        limparTela()
-        exibirHeader()
+private fun lerCorpo(ex: HttpExchange): Map<*, *> {
+    val txt = ex.requestBody.readNBytes(100_000).toString(Charsets.UTF_8)
+    if (txt.isBlank()) return emptyMap<String, Any?>()
+    return try { Json.parse(txt) as? Map<*, *> ?: throw ErroNegocio(400, "Dados inválidos.") }
+    catch (e: IllegalArgumentException) { throw ErroNegocio(400, "Dados inválidos.") }
+}
 
-        val quantidades = baldes.map { (nome, icone, _) -> lerQuantidade(nome, icone) }
-
-        val total = exibirTabela(quantidades)
-        exibirAbatimento(total)
-    } while (perguntarReiniciar())
-
-    println()
-    println("  ${C.CIANO}${C.BOLD}Até logo! Bom trabalho hoje. \uD83C\uDF1F${C.RESET}")
-    println()
+private fun responder(ex: HttpExchange, status: Int, bytes: ByteArray, tipo: String) {
+    ex.responseHeaders.set("Content-Type", tipo)
+    ex.sendResponseHeaders(status, bytes.size.toLong())
+    ex.responseBody.use { it.write(bytes) }
 }

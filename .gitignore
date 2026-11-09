@@ -3,6 +3,10 @@
 out/
 *.iml
 .kotlin
+build/
+
+# Dados reais (valores e pagamentos) - ficam so no computador
+**/data/
 
 # Sistema
 .DS_Store
